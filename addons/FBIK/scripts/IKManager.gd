@@ -801,20 +801,30 @@ static func calc_next(from: Vector3, to: Vector3, length: float) -> Vector3:
 	return from + (to - from).normalized() * length
 
 ## Create rotation quaternion from one direction to another
-static func from_to_rotation(from: Vector3, to: Vector3) -> Quaternion:
-	var k_cos_theta: float = from.dot(to)
-	var k: float = sqrt(from.length_squared() * to.length_squared())
+static func from_to_rotation(from : Vector3, to : Vector3) -> Quaternion:
+	# Safety checks for zero-length vectors
+	if from.length_squared() < 0.000001 or to.length_squared() < 0.000001:
+		return Quaternion(0, 0, 0, 1)  # Identity quaternion
 	
-	if k_cos_theta / k == -1.0:
-		# 180 degree rotation - find perpendicular axis
-		var orthogonal: Vector3 = Vector3.UP
-		if abs(from.dot(Vector3.UP)) > 0.9:
-			orthogonal = Vector3.RIGHT
-		return Quaternion(from.cross(orthogonal).normalized(), PI)
-	elif k_cos_theta / k == 1.0:
-		return Quaternion.IDENTITY
+	from = from.normalized()
+	to = to.normalized()
 	
-	var axis: Vector3 = from.cross(to)
+	var k_cos_theta : float = from.dot(to)
+	var axis : Vector3 = from.cross(to)
+	
+	# Check for parallel vectors
+	if axis.length_squared() < 0.000001:
+		if k_cos_theta > 0:
+			return Quaternion(0, 0, 0, 1)  # Same direction
+		else:
+			# 180 degree rotation - find orthogonal vector
+			var ortho = Vector3(1, 0, 0)
+			if abs(from.x) > 0.9:
+				ortho = Vector3(0, 1, 0)
+			axis = from.cross(ortho).normalized()
+			return Quaternion(axis.x, axis.y, axis.z, 0).normalized()
+	
+	var k : float = sqrt(from.length_squared() * to.length_squared())
 	return Quaternion(axis.x, axis.y, axis.z, k_cos_theta + k).normalized()
 
 ## Rotate quaternion around an axis to face target
