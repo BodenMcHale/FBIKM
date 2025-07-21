@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=4 uid="uid://b3jxr7yq6kqjt"]
+[gd_scene load_steps=10 format=4 uid="uid://b3jxr7yq6kqjt"]
 
 [ext_resource type="Script" uid="uid://drwhut4kuwe8b" path="res://addons/FBIK/scripts/IKManager.gd" id="1_coq8p"]
 [ext_resource type="Script" uid="uid://crlnyynsrixme" path="res://addons/FBIK/scripts/IKChain.gd" id="2_2nij2"]
@@ -884,7 +884,11 @@ bind/282/name = &"thigh_ik_target.R"
 bind/282/bone = -1
 bind/282/pose = Transform3D(0.391747, 0.0910271, -8.45419e-05, -0.0910271, 0.391746, -0.000737358, -8.454e-05, 0.000737359, 0.402183, 0.00146572, 0.00482903, -0.002845)
 
-[node name="Node3D" type="Node3D"]
+[sub_resource type="BoxMesh" id="BoxMesh_coq8p"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_2nij2"]
+
+[node name="test_scene" type="Node3D"]
 
 [node name="BaseModel" type="Node3D" parent="."]
 
@@ -1280,7 +1284,6 @@ skeleton = NodePath("")
 [node name="KinematicsManager" type="Node" parent="BaseModel/metarig"]
 script = ExtResource("1_coq8p")
 enabled = true
-skeleton = NodePath("../Skeleton3D")
 metadata/_custom_type_script = "uid://drwhut4kuwe8b"
 
 [node name="KinematicsPole" type="Marker3D" parent="BaseModel/metarig/KinematicsManager"]
@@ -1299,3 +1302,18 @@ script = ExtResource("2_2nij2")
 tip_bone_id = "-1"
 root_bone_id = "-1"
 metadata/_custom_type_script = "uid://crlnyynsrixme"
+
+[node name="StaticBody3D" type="StaticBody3D" parent="."]
+transform = Transform3D(3, 0, 0, 0, 3, 0, 0, 0, 3, 0, -1.52306, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="StaticBody3D"]
+mesh = SubResource("BoxMesh_coq8p")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D"]
+shape = SubResource("BoxShape3D_2nij2")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.959535, 0.281588, 0, -0.281588, 0.959535, 0, 1.1004, 1.9062)
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.707107, -0.640856, 0.298836, 0, 0.422618, 0.906308, -0.707107, -0.640856, 0.298836, 0, 100, 0)
