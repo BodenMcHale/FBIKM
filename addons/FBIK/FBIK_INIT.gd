@@ -22,7 +22,7 @@ func _enter_tree() -> void:
 	# add_custom_type("KinematicsSolidifier", "Node", load("scripts/IKSolidifier.gd"), preload("icons/SpringyBones.svg"))
 	
 	# Constraint nodes
-	add_custom_type("KinematicsBind", "Node", preload("./scripts/IKBind.gd"), preload("icons/Bind.svg"))
+	add_custom_type("KinematicsBind", "Node", load("./scripts/IKBind.gd"), preload("icons/Bind.svg"))
 	add_custom_type("KinematicsFork", "Node", preload("./scripts/IKForkBind.gd"), preload("icons/ForkBind.svg"))
 	add_custom_type("KinematicsCage", "Node", preload("./scripts/IKCage.gd"), preload("icons/CageBind.svg"))
 	
