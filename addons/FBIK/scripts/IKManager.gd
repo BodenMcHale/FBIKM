@@ -9,6 +9,8 @@ const FBIKM_NODE_ID = 0  # THIS NODE'S IDENTIFIER
 			R3X-G1L6AME5H  (github)
 	This is the core of the active ragdolls. This joint attempts to match its own rotation with that of
 	the animation skeleton, creating the active radolls we al know and love.
+	
+	UPDATED FOR GODOT 4.4.1 - Fixed bone referencing and transform handling
 """
 
 ## CONSTANTS ###############################################################################################
@@ -78,7 +80,8 @@ func _set_skeleton(value: Skeleton3D) -> void:
 			_bone_names_4_children = "VOID:-1,"
 			var n: int = value.get_bone_count()
 			for i in range(n):
-				_bone_names_4_children += value.get_bone_name(i) + ":" + str(i) + ","
+				var bone_name := value.get_bone_name(i)
+				_bone_names_4_children += bone_name + ":" + str(i) + ","
 
 			_bone_names_4_children = _bone_names_4_children.rstrip(",")
 			bone_names_obtained.emit(_bone_names_4_children)
@@ -129,6 +132,11 @@ func _build_virtual_skeleton(in_editor: bool) -> Error:
 		enabled = false
 		return FAILED
 	virt_skel = VirtualSkeleton.new(skeleton, in_editor)
+	
+	# Debug: List all bones
+	if DEBUG_dump_bones:
+		virt_skel.list_all_bones()
+	
 	return OK
 
 ## DEBUG WIREFRAME FUNCTIONS ##############################################################################
@@ -291,70 +299,105 @@ func _reevaluate_drivers() -> void:
 ## DRIVER EVALUATION FUNCTIONS #############################################################################
 
 func _eval_chain_node(chain: Node) -> void:
-	if not virt_skel.has_bone(chain.tip_bone_id):
-		push_error("IK Chain [" + chain.name + "] ignored. Couldn't find the bone with id [" + chain.tip_bone_id + "].")
+	# Convert bone name to ID if needed
+	var tip_bone_id := virt_skel.find_bone_by_name(chain.tip_bone_id)
+	if not virt_skel.has_bone(tip_bone_id):
+		push_error("IK Chain [" + chain.name + "] ignored. Couldn't find the bone with id/name [" + chain.tip_bone_id + "].")
+		print("Available bones: ", virt_skel.bone_name_to_id.keys())
 		return
+	# Update the chain with correct bone ID
+	chain.tip_bone_id = tip_bone_id
+	chain.root_bone_id = virt_skel.find_bone_by_name(chain.root_bone_id)
 	_chains.push_back(chain)
 
 func _eval_pole_node(pole: Node) -> void:
-	if not virt_skel.has_bone(str(pole.tip_bone_id)):
-		push_error("IK Pole [" + pole.name + "] ignored. Couldn't find the bone with id [" + str(pole.tip_bone_id) + "].")
+	var tip_bone_id := virt_skel.find_bone_by_name(pole.tip_bone_id)
+	if not virt_skel.has_bone(tip_bone_id):
+		push_error("IK Pole [" + pole.name + "] ignored. Couldn't find the bone with id/name [" + str(pole.tip_bone_id) + "].")
 		return
 	
-	if virt_skel.get_bone_parent(str(pole.tip_bone_id)) == "-1" or virt_skel.get_bone_parent(virt_skel.get_bone_parent(str(pole.tip_bone_id))) == "-1":
+	if virt_skel.get_bone_parent(tip_bone_id) == "-1" or virt_skel.get_bone_parent(virt_skel.get_bone_parent(tip_bone_id)) == "-1":
 		push_error("IK Pole [" + pole.name + "] ignored. Chain too short.")
 		return
 	
+	# Update with correct bone IDs
+	pole.tip_bone_id = tip_bone_id
+	pole.root_bone_id = virt_skel.find_bone_by_name(pole.root_bone_id)
 	_poles.push_back(pole)
 
 func _eval_look_at_node(look_at: Node) -> void:
-	if not virt_skel.has_bone(look_at.bone_id):
-		push_error("IK Look-At [" + look_at.name + "] ignored. Couldn't find the bone with id [" + str(look_at.bone_id) + "].")
+	var bone_id := virt_skel.find_bone_by_name(look_at.bone_id)
+	if not virt_skel.has_bone(bone_id):
+		push_error("IK Look-At [" + look_at.name + "] ignored. Couldn't find the bone with id/name [" + str(look_at.bone_id) + "].")
 		return
-	if not virt_skel.has_bone(virt_skel.get_bone_parent(look_at.bone_id)):
+	if not virt_skel.has_bone(virt_skel.get_bone_parent(bone_id)):
 		push_error("IK Look-At [" + look_at.name + "] ignored. Specified bone [" + str(look_at.bone_id) + "] doesn't have a parent. This Look-at cannot be solved.")
 		return
 	
+	# Update with correct bone ID
+	look_at.bone_id = bone_id
 	_look_ats.push_back(look_at)
-	virt_skel.set_bone_modifier(look_at.bone_id, VirtualSkeleton.MODIFIER.LOOK_AT)
+	virt_skel.set_bone_modifier(bone_id, VirtualSkeleton.MODIFIER.LOOK_AT)
 
 func _eval_exaggerator_node(exaggerator: Node) -> void:
-	if not virt_skel.has_bone(exaggerator.bone_id):
+	var bone_id := virt_skel.find_bone_by_name(exaggerator.bone_id)
+	if not virt_skel.has_bone(bone_id):
 		push_error("IK Exaggerator [" + exaggerator.name + "] ignored. Invalid Bone Id.")
 		return
-	if not exaggerator.is_connected("multiplier_changed", _on_exaggerator_change):
-		exaggerator.connect("multiplier_changed", _on_exaggerator_change)
+	
+	# Update with correct bone ID
+	exaggerator.bone_id = bone_id
+	if not exaggerator.is_connected("length_changed", _on_exaggerator_change):
+		exaggerator.connect("length_changed", _on_exaggerator_change)
 
 func _eval_solidifier_node(solidifier: Node) -> void:
-	if not virt_skel.has_bone(solidifier.bone_id):
+	var bone_id := virt_skel.find_bone_by_name(solidifier.bone_id)
+	if not virt_skel.has_bone(bone_id):
 		push_error("IK Solidifier [" + solidifier.name + "] ignored. Specified bone does not exist.")
 		return
-	if virt_skel.get_bone_children(solidifier.bone_id).size() == 0:
+	if virt_skel.get_bone_children(bone_id).size() == 0:
 		push_error("IK Solidifier [" + solidifier.name + "] ignored. The bone specified is a tip.")
 		return
-	virt_skel.set_bone_modifier(solidifier.bone_id, VirtualSkeleton.MODIFIER.SOLID)
+	
+	# Update with correct bone ID
+	solidifier.bone_id = bone_id
+	virt_skel.set_bone_modifier(bone_id, VirtualSkeleton.MODIFIER.SOLID)
 
 func _eval_damped_transform_node(damped_transform: Node) -> void:
-	if not virt_skel.has_bone(damped_transform.bone_id):
+	var bone_id := virt_skel.find_bone_by_name(damped_transform.bone_id)
+	if not virt_skel.has_bone(bone_id):
 		push_error("IK Damped Transform [" + damped_transform.name + "] ignored. Specified bone does not exist.")
 		return
-	virt_skel.set_bone_modifier(damped_transform.bone_id, VirtualSkeleton.MODIFIER.DAMPED_TRANSFORM, damped_transform)
+	
+	# Update with correct bone ID
+	damped_transform.bone_id = bone_id
+	virt_skel.set_bone_modifier(bone_id, VirtualSkeleton.MODIFIER.DAMPED_TRANSFORM, damped_transform)
 
 func _eval_bind_node(bind: Node) -> void:
-	if not virt_skel.has_bone(bind.bone_1):
-		push_error("IK Bind [" + bind.name + "] ignored. Bone 1 ID [" + bind.bone_1 + "] is invalid.")
+	# Convert all bone names to IDs
+	var bone_1_id := virt_skel.find_bone_by_name(bind.bone_1)
+	var bone_2_id := virt_skel.find_bone_by_name(bind.bone_2)
+	var bone_3_id := virt_skel.find_bone_by_name(bind.bone_3)
+	
+	if not virt_skel.has_bone(bone_1_id):
+		push_error("IK Bind [" + bind.name + "] ignored. Bone 1 ID/Name [" + bind.bone_1 + "] is invalid.")
 		return
-	if not virt_skel.has_bone(bind.bone_2):
-		push_error("IK Bind [" + bind.name + "] ignored. Bone 2 ID [" + bind.bone_2 + "] is invalid.")
+	if not virt_skel.has_bone(bone_2_id):
+		push_error("IK Bind [" + bind.name + "] ignored. Bone 2 ID/Name [" + bind.bone_2 + "] is invalid.")
 		return
-	if not virt_skel.has_bone(bind.bone_3):
-		push_error("IK Bind [" + bind.name + "] ignored. Bone 3 ID [" + bind.bone_3 + "] is invalid.")
+	if not virt_skel.has_bone(bone_3_id):
+		push_error("IK Bind [" + bind.name + "] ignored. Bone 3 ID/Name [" + bind.bone_3 + "] is invalid.")
 		return
 	
+	# Update with correct bone IDs
+	bind.bone_1 = bone_1_id
+	bind.bone_2 = bone_2_id
+	bind.bone_3 = bone_3_id
+	
 	# Calculate lengths
-	bind.length_12 = (virt_skel.get_bone_position(bind.bone_1) - virt_skel.get_bone_position(bind.bone_2)).length()
-	bind.length_23 = (virt_skel.get_bone_position(bind.bone_2) - virt_skel.get_bone_position(bind.bone_3)).length()
-	bind.length_31 = (virt_skel.get_bone_position(bind.bone_3) - virt_skel.get_bone_position(bind.bone_1)).length()
+	bind.length_12 = (virt_skel.get_bone_position(bone_1_id) - virt_skel.get_bone_position(bone_2_id)).length()
+	bind.length_23 = (virt_skel.get_bone_position(bone_2_id) - virt_skel.get_bone_position(bone_3_id)).length()
+	bind.length_31 = (virt_skel.get_bone_position(bone_3_id) - virt_skel.get_bone_position(bone_1_id)).length()
 	
 	# Calculate correction bone lengths and cross-references
 	for b in _binds:
@@ -391,51 +434,83 @@ func _eval_bind_node(bind: Node) -> void:
 	virt_skel.set_bone_modifier(VOID_ID, VirtualSkeleton.MODIFIER.BIND, bind)
 
 func _eval_fork_bind_node(fork_bind: Node) -> void:
-	if not virt_skel.has_bone(fork_bind.bone_target):
-		push_error("IK Fork Bind [" + fork_bind.name + "] ignored. Target Bone ID [" + fork_bind.bone_target + "] is invalid.")
+	# Convert all bone names to IDs
+	var bone_target_id := virt_skel.find_bone_by_name(fork_bind.bone_target)
+	var bone_1_id := virt_skel.find_bone_by_name(fork_bind.bone_1)
+	var bone_2_id := virt_skel.find_bone_by_name(fork_bind.bone_2)
+	var bone_3_id := virt_skel.find_bone_by_name(fork_bind.bone_3)
+	
+	if not virt_skel.has_bone(bone_target_id):
+		push_error("IK Fork Bind [" + fork_bind.name + "] ignored. Target Bone ID/Name [" + fork_bind.bone_target + "] is invalid.")
 		return
-	if not virt_skel.has_bone(fork_bind.bone_1):
-		push_error("IK Fork Bind [" + fork_bind.name + "] ignored. Bone 1 ID [" + fork_bind.bone_1 + "] is invalid.")
+	if not virt_skel.has_bone(bone_1_id):
+		push_error("IK Fork Bind [" + fork_bind.name + "] ignored. Bone 1 ID/Name [" + fork_bind.bone_1 + "] is invalid.")
 		return
-	if not virt_skel.has_bone(fork_bind.bone_2):
-		push_error("IK Fork Bind [" + fork_bind.name + "] ignored. Bone 2 ID [" + fork_bind.bone_2 + "] is invalid.")
+	if not virt_skel.has_bone(bone_2_id):
+		push_error("IK Fork Bind [" + fork_bind.name + "] ignored. Bone 2 ID/Name [" + fork_bind.bone_2 + "] is invalid.")
 		return
-	if not virt_skel.has_bone(fork_bind.bone_3):
-		push_error("IK Fork Bind [" + fork_bind.name + "] ignored. Bone 3 ID [" + fork_bind.bone_3 + "] is invalid.")
+	if not virt_skel.has_bone(bone_3_id):
+		push_error("IK Fork Bind [" + fork_bind.name + "] ignored. Bone 3 ID/Name [" + fork_bind.bone_3 + "] is invalid.")
 		return
 	
-	fork_bind.length_1 = (virt_skel.get_bone_position(fork_bind.bone_1) - virt_skel.get_bone_position(fork_bind.bone_target)).length()
-	fork_bind.length_2 = (virt_skel.get_bone_position(fork_bind.bone_2) - virt_skel.get_bone_position(fork_bind.bone_target)).length()
-	fork_bind.length_3 = (virt_skel.get_bone_position(fork_bind.bone_3) - virt_skel.get_bone_position(fork_bind.bone_target)).length()
+	# Update with correct bone IDs
+	fork_bind.bone_target = bone_target_id
+	fork_bind.bone_1 = bone_1_id
+	fork_bind.bone_2 = bone_2_id
+	fork_bind.bone_3 = bone_3_id
+	
+	fork_bind.length_1 = (virt_skel.get_bone_position(bone_1_id) - virt_skel.get_bone_position(bone_target_id)).length()
+	fork_bind.length_2 = (virt_skel.get_bone_position(bone_2_id) - virt_skel.get_bone_position(bone_target_id)).length()
+	fork_bind.length_3 = (virt_skel.get_bone_position(bone_3_id) - virt_skel.get_bone_position(bone_target_id)).length()
 	
 	fork_bind.bind_id = _fork_binds.size()
 	_fork_binds.push_back(fork_bind)
 	virt_skel.set_bone_modifier(VOID_ID, VirtualSkeleton.MODIFIER.FORK_BIND, fork_bind)
 
 func _eval_cage_bind_node(cage: Node) -> void:
-	if not virt_skel.has_bone(cage.backbone_1):
-		push_error("IK Cage Bind [" + cage.name + "] ignored. Target Bone ID [" + cage.backbone_1 + "] is invalid.")
+	# Convert all bone names to IDs
+	var backbone_1_id := virt_skel.find_bone_by_name(cage.backbone_1)
+	var backbone_2_id := virt_skel.find_bone_by_name(cage.backbone_2)
+	var target_bone_1_id := virt_skel.find_bone_by_name(cage.target_bone_1)
+	var target_bone_2_id := virt_skel.find_bone_by_name(cage.target_bone_2)
+	
+	if not virt_skel.has_bone(backbone_1_id):
+		push_error("IK Cage Bind [" + cage.name + "] ignored. Backbone 1 ID/Name [" + cage.backbone_1 + "] is invalid.")
 		return
-	if not virt_skel.has_bone(cage.backbone_2):
-		push_error("IK Cage Bind [" + cage.name + "] ignored. Bone 1 ID [" + cage.backbone_2 + "] is invalid.")
+	if not virt_skel.has_bone(backbone_2_id):
+		push_error("IK Cage Bind [" + cage.name + "] ignored. Backbone 2 ID/Name [" + cage.backbone_2 + "] is invalid.")
 		return
-	if not virt_skel.has_bone(cage.target_bone_1):
-		push_error("IK Cage Bind [" + cage.name + "] ignored. Bone 2 ID [" + cage.target_bone_1 + "] is invalid.")
+	if not virt_skel.has_bone(target_bone_1_id):
+		push_error("IK Cage Bind [" + cage.name + "] ignored. Target Bone 1 ID/Name [" + cage.target_bone_1 + "] is invalid.")
 		return
-	if not virt_skel.has_bone(cage.target_bone_2):
-		push_error("IK Cage Bind [" + cage.name + "] ignored. Bone 3 ID [" + cage.target_bone_2 + "] is invalid.")
+	if not virt_skel.has_bone(target_bone_2_id):
+		push_error("IK Cage Bind [" + cage.name + "] ignored. Target Bone 2 ID/Name [" + cage.target_bone_2 + "] is invalid.")
 		return
 	
-	cage.b1b2_length = (virt_skel.get_bone_position(cage.backbone_1) - virt_skel.get_bone_position(cage.backbone_2)).length()
-	cage.b1t1_length = (virt_skel.get_bone_position(cage.backbone_1) - virt_skel.get_bone_position(cage.target_bone_1)).length()
-	cage.b1t2_length = (virt_skel.get_bone_position(cage.backbone_1) - virt_skel.get_bone_position(cage.target_bone_2)).length()
-	cage.b2t1_length = (virt_skel.get_bone_position(cage.backbone_2) - virt_skel.get_bone_position(cage.target_bone_1)).length()
-	cage.b2t2_length = (virt_skel.get_bone_position(cage.backbone_2) - virt_skel.get_bone_position(cage.target_bone_2)).length()
-	cage.t1t2_length = (virt_skel.get_bone_position(cage.target_bone_1) - virt_skel.get_bone_position(cage.target_bone_2)).length()
+	# Update with correct bone IDs
+	cage.backbone_1 = backbone_1_id
+	cage.backbone_2 = backbone_2_id
+	cage.target_bone_1 = target_bone_1_id
+	cage.target_bone_2 = target_bone_2_id
 	
-	cage.b2_correction_length = (virt_skel.get_bone_position(cage.backbone_2) - virt_skel.get_bone_position(cage.backbone_2_correction)).length()
-	cage.t1_correction_length = (virt_skel.get_bone_position(cage.target_bone_1) - virt_skel.get_bone_position(cage.target_bone_1_correction)).length()
-	cage.t2_correction_length = (virt_skel.get_bone_position(cage.target_bone_2) - virt_skel.get_bone_position(cage.target_bone_2_correction)).length()
+	cage.b1b2_length = (virt_skel.get_bone_position(backbone_1_id) - virt_skel.get_bone_position(backbone_2_id)).length()
+	cage.b1t1_length = (virt_skel.get_bone_position(backbone_1_id) - virt_skel.get_bone_position(target_bone_1_id)).length()
+	cage.b1t2_length = (virt_skel.get_bone_position(backbone_1_id) - virt_skel.get_bone_position(target_bone_2_id)).length()
+	cage.b2t1_length = (virt_skel.get_bone_position(backbone_2_id) - virt_skel.get_bone_position(target_bone_1_id)).length()
+	cage.b2t2_length = (virt_skel.get_bone_position(backbone_2_id) - virt_skel.get_bone_position(target_bone_2_id)).length()
+	cage.t1t2_length = (virt_skel.get_bone_position(target_bone_1_id) - virt_skel.get_bone_position(target_bone_2_id)).length()
+	
+	if cage.backbone_2_correction != "":
+		cage.backbone_2_correction = virt_skel.find_bone_by_name(cage.backbone_2_correction)
+		cage.b2_correction_length = (virt_skel.get_bone_position(backbone_2_id) - virt_skel.get_bone_position(cage.backbone_2_correction)).length()
+	
+	if cage.target_bone_1_correction != "":
+		cage.target_bone_1_correction = virt_skel.find_bone_by_name(cage.target_bone_1_correction)
+		cage.t1_correction_length = (virt_skel.get_bone_position(target_bone_1_id) - virt_skel.get_bone_position(cage.target_bone_1_correction)).length()
+	
+	if cage.target_bone_2_correction != "":
+		cage.target_bone_2_correction = virt_skel.find_bone_by_name(cage.target_bone_2_correction)
+		cage.t2_correction_length = (virt_skel.get_bone_position(target_bone_2_id) - virt_skel.get_bone_position(cage.target_bone_2_correction)).length()
 	
 	cage.bind_id = _cage_binds.size()
 	_cage_binds.push_back(cage)
@@ -456,45 +531,75 @@ func _physics_process(_delta: float) -> void:
 		if debug_wireframe:
 			_update_debug_wireframe()
 
-## SOLVING FUNCTIONS ######################################################################################
-
+## SOLVING FUNCTIONS - SIMPLIFIED STUBS FOR NOW ###########################################################
+## Note: These would need to be implemented with your full FABRIK logic
 func solve_chains(inverse_transform: Transform3D) -> void:
 	var diff: float = 0.0
+	
+	# Calculate initial difference
 	for d in _chains:
-		diff += virt_skel.get_bone_position(d.tip_bone_id).distance_squared_to(inverse_transform * d.get_target().origin)
+		if virt_skel.has_bone(d.tip_bone_id):
+			# d.get_target_position() returns Vector3
+			var target_pos: Vector3 = inverse_transform * d.get_target_position()
+			diff += virt_skel.get_bone_position(d.tip_bone_id).distance_squared_to(target_pos)
 	
 	var can_solve: int = max_iterations
 	while can_solve > 0 and diff > minimal_distance * minimal_distance * _chains.size():
+		# Solve Backwards pass
 		for d in _chains:
-			solve_backwards(d.root_bone_id, d.tip_bone_id, inverse_transform * d.get_target(), d.pull_strength)
+			if virt_skel.has_bone(d.tip_bone_id) and virt_skel.has_bone(d.root_bone_id):
+				# Create target transform from position
+				var target_transform := Transform3D()
+				target_transform.origin = inverse_transform * d.get_target_position()
+				# Keep identity basis for now, or you could get the chain's transform.basis
+				
+				solve_backwards(d.root_bone_id, d.tip_bone_id, target_transform, d.pull_strength)
 		
+		# Solve Forwards pass
 		total_pass()
 		
+		# Recalculate difference for convergence check
 		diff = 0.0
 		for d in _chains:
-			diff += virt_skel.get_bone_position(d.tip_bone_id).distance_squared_to(inverse_transform * d.get_target().origin)
+			if virt_skel.has_bone(d.tip_bone_id):
+				var target_pos: Vector3 = inverse_transform * d.get_target_position()
+				diff += virt_skel.get_bone_position(d.tip_bone_id).distance_squared_to(target_pos)
 		can_solve -= 1
+
+# Also need to update the other solve functions:
 
 func solve_poles(inverse_transform: Transform3D) -> void:
 	for p in _poles:
-		solve_pole(str(p.root_bone_id), str(p.tip_bone_id), inverse_transform * p.get_target().origin, p.turn_to)
+		if virt_skel.has_bone(p.tip_bone_id) and virt_skel.has_bone(p.root_bone_id):
+			# Assuming poles also have get_target_position() -> Vector3
+			var target_pos: Vector3 = inverse_transform * p.get_target_position()
+			solve_pole(p.root_bone_id, p.tip_bone_id, target_pos, p.turn_to)
 
 func solve_look_ats(inverse_transform: Transform3D) -> void:
 	for l in _look_ats:
-		var spin_override: float = 0.0
-		if l.has_method("get"):
-			spin_override = l.get("up-down_spin_override_angle") if l.get("up-down_spin_override_angle") != null else 0.0
-		solve_look_at(l.bone_id, inverse_transform * l.get_target().origin, l.look_from_side, spin_override)
+		if virt_skel.has_bone(l.bone_id):
+			# Assuming look_ats also have get_target_position() -> Vector3
+			var target_pos: Vector3 = inverse_transform * l.get_target_position()
+			var spin_override: float = 0.0
+			
+			# Check if the node has the spin override property
+			if l.has_method("get") and l.get("up-down_spin_override_angle") != null:
+				spin_override = l.get("up-down_spin_override_angle")
+			
+			solve_look_at(l.bone_id, target_pos, l.look_from_side, spin_override)
 
 func total_pass() -> void:
 	for chain in _chains:
-		solve_backwards(chain.root_bone_id, chain.tip_bone_id, 
-			Transform3D(Basis(virt_skel.get_bone_rotation(chain.tip_bone_id)), virt_skel.get_bone_position(chain.tip_bone_id)),
-			chain.pull_strength)
+		if virt_skel.has_bone(chain.tip_bone_id) and virt_skel.has_bone(chain.root_bone_id):
+			solve_backwards(chain.root_bone_id, chain.tip_bone_id, 
+				Transform3D(Basis(virt_skel.get_bone_rotation(chain.tip_bone_id)), virt_skel.get_bone_position(chain.tip_bone_id)),
+				chain.pull_strength)
+	
 	for root in virt_skel.roots:
-		solve_forwards(root, virt_skel.bones[root].initial_position)
+		if virt_skel.bones.has(root) and virt_skel.bones[root].has("initial_position"):
+			solve_forwards(root, virt_skel.bones[root]["initial_position"])
 
-# Placeholder solving functions - implement based on your original VirtualSkeleton system
+# Placeholder solving functions - you'd implement these with your full FABRIK logic
 func solve_backwards(root_id: String, tip_id: String, target: Transform3D, weight: float) -> void:
 	# Implementation would match your existing solve_backwards logic
 	pass

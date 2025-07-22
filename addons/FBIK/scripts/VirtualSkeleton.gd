@@ -1,13 +1,16 @@
 extends RefCounted
+class_name VirtualSkeleton
 
 """
 		FBIKM - Virtual Skeleton
 				by Nemo Czanderlitch/Nino Čandrlić
 						@R3X-G1L       (godot assets store)
 						R3X-G1L6AME5H  (github)
-		This is an higher level representation of the Godot Skeleton Node; it holds more data.
+		This is an higher level representation of the Godot Skeleton3D Node; it holds more data.
 		It stores child bones, thusly allowing for solving branches in the Skeleton.
 		Additionally, it holds more rotation data for smoother solutions.
+		
+		UPDATED FOR GODOT 4.4.1 - Fixed bone referencing and transform handling
 """
 
 enum MODIFIER {
@@ -20,457 +23,440 @@ enum MODIFIER {
 	LOOK_AT = 32
 }
 
-var bones := Dictionary()
+var bones := {}
 var skel: Skeleton3D
 var roots := PackedStringArray([])
 
-### INIT - Fixed for Godot 4.4.1
-func _init(skeleton: Skeleton3D, build_with_initial_transform: bool):
-	skel = skeleton
-	
-	# Ensure skeleton is valid
-	if not skeleton or skeleton.get_bone_count() == 0:
-		push_error("VirtualSkeleton: Invalid skeleton or no bones found")
-		return
-	
-	# Initialize bones using the correct Godot 4 API
-	for id in range(skeleton.get_bone_count()):
-		# Use get_bone_pose (local pose) instead of get_bone_global_pose for initialization
-		var bone_transform: Transform3D
-		
-		# Try to get the rest transform first, fall back to pose
-		bone_transform = skeleton.get_bone_rest(id)
-		
-		# Validate transform
-		if _is_transform_valid(bone_transform):
-			add_bone(str(id), 
-						str(skeleton.get_bone_parent(id)),
-						bone_transform,
-						build_with_initial_transform)
-		else:
-			print("Warning: Bone ", skeleton.get_bone_name(id), " (ID: ", id, ") has invalid rest transform. Using identity.")
-			add_bone(str(id), 
-						str(skeleton.get_bone_parent(id)),
-						Transform3D.IDENTITY,
-						build_with_initial_transform)
-	
-	# Setup bone hierarchy and directions
-	_setup_bone_directions()
+# Bone name to ID mapping for efficient lookups
+var bone_name_to_id := {}
+var bone_id_to_name := {}
 
-# Separate function to set up bone directions after all bones are created
-func _setup_bone_directions():
+### INIT
+func _init(skeleton: Skeleton3D, build_with_initial_transform: bool) -> void:
+	skel = skeleton
+	_build_bone_mappings()
+	
+	for id in range(skeleton.get_bone_count()):
+		add_bone(str(id), 
+				str(skeleton.get_bone_parent(id)),
+				skeleton.get_bone_global_pose(id),
+				build_with_initial_transform)
+	
+	_calculate_bone_directions()
+
+func _build_bone_mappings() -> void:
+	"""Build efficient bone name <-> ID mappings"""
+	bone_name_to_id.clear()
+	bone_id_to_name.clear()
+	
+	for i in range(skel.get_bone_count()):
+		var bone_name := skel.get_bone_name(i)
+		bone_name_to_id[bone_name] = i
+		bone_id_to_name[i] = bone_name
+		
+		# Also map by string ID for compatibility
+		bone_name_to_id[str(i)] = i
+
+func _calculate_bone_directions() -> void:
+	"""Calculate initial bone directions after all bones are added"""
+	# Put all bones whose parent is -1 in a solving queue 
 	var bone_queue := PackedStringArray([])
-	
-	# Start with root bones
 	for root in roots:
-		var children = self.get_bone_children(root)
-		for child in children:
-			bone_queue.append(child)
+		bone_queue.append_array(PackedStringArray(get_bone_children(root)))
 	
-	if bone_queue.size() == 0:
+	if bone_queue.is_empty():
 		return
-		
-	var current_bone = bone_queue[0]
-	bone_queue = bone_queue.slice(1)
 	
-	while current_bone != "":
-		var num_of_children = self.get_bone_children_count(current_bone)
-		
+	var current_bone := bone_queue[0]
+	bone_queue.remove_at(0)
+	
+	while true: 
+		var num_of_children := get_bone_children_count(current_bone)
 		if num_of_children == 0:
 			# Leaf node
-			var parent_id = self.get_bone_parent(current_bone)
-			if parent_id != "-1" and bones.has(parent_id):
-				var direction = bones[current_bone].position - bones[parent_id].position
-				bones[current_bone].start_direction = direction.normalized() if direction.length() > 0.001 else Vector3.FORWARD
-				bones[current_bone].length = direction.length()
-			else:
-				bones[current_bone].start_direction = Vector3.FORWARD
+			var parent_id := get_bone_parent(current_bone)
+			if parent_id != "-1":
+				bones[current_bone].start_direction = get_bone_position(current_bone) - get_bone_position(parent_id)
 			
 			if bone_queue.size() == 0:
 				break
 			
+			# Pop the first item in queue
 			current_bone = bone_queue[0]
-			bone_queue = bone_queue.slice(1)
+			bone_queue.remove_at(0)
 		else:
-			# Branch node
-			for child_bone in self.get_bone_children(current_bone):
+			# Inside Chain
+			for child_bone in get_bone_children(current_bone):
+				# Push branch on the queue so it can be solved later
 				bone_queue.push_back(child_bone)
 			
-			var parent_id = self.get_bone_parent(current_bone)
-			if parent_id != "-1" and bones.has(parent_id):
-				var direction = bones[current_bone].position - bones[parent_id].position
-				bones[current_bone].start_direction = direction.normalized() if direction.length() > 0.001 else Vector3.FORWARD
-				bones[current_bone].length = direction.length()
-			else:
-				bones[current_bone].start_direction = Vector3.FORWARD
-				
-			if bone_queue.size() > 0:
-				current_bone = bone_queue[0]
-				bone_queue = bone_queue.slice(1)
-			else:
-				break
-
-# Safety check for transform validity
-func _is_transform_valid(transform: Transform3D) -> bool:
-	# Check for NaN or infinite values in origin
-	var origin = transform.origin
-	if not (is_finite(origin.x) and is_finite(origin.y) and is_finite(origin.z)):
-		return false
-	
-	# Check for NaN or infinite values in basis
-	var basis = transform.basis
-	for i in range(3):
-		var column = basis[i]
-		if not (is_finite(column.x) and is_finite(column.y) and is_finite(column.z)):
-			return false
-	
-	# Check if basis determinant is reasonable (not degenerate)
-	var det = basis.determinant()
-	if not is_finite(det) or abs(det) < 0.0001:
-		return false
-	
-	return true
-
-# Safe quaternion extraction from basis
-func _safe_get_rotation_quaternion(basis: Basis) -> Quaternion:
-	# First check if basis is valid
-	var det = basis.determinant()
-	if not is_finite(det) or abs(det) < 0.0001:
-		return Quaternion.IDENTITY
-	
-	# Try to orthonormalize
-	var normalized_basis = basis.orthonormalized()
-	
-	# Get quaternion from normalized basis
-	var quat = normalized_basis.get_rotation_quaternion()
-	
-	# Validate quaternion components
-	if not (is_finite(quat.x) and is_finite(quat.y) and is_finite(quat.z) and is_finite(quat.w)):
-		return Quaternion.IDENTITY
-	
-	# Check if quaternion is normalized (should be close to 1)
-	var length_sq = quat.length_squared()
-	if not is_finite(length_sq) or abs(length_sq - 1.0) > 0.1:
-		return Quaternion.IDENTITY
-	
-	return quat
+			var parent_id := get_bone_parent(current_bone)
+			if parent_id != "-1":
+				bones[current_bone].start_direction = get_bone_position(current_bone) - get_bone_position(parent_id)
+			
+			# Pop the first item in queue
+			current_bone = bone_queue[0]
+			bone_queue.remove_at(0)
 
 func add_bone(bone_id: String, parent_id: String, transform: Transform3D, build_with_initial_transform: bool) -> void:
 	var direction := Vector3.ZERO
 	var preexisting_children := []
 	
-	# If a parent exists, link them and calculate direction
+	# If a parent exists, immediately solve the distance from it to child, as well as link them
 	if bones.has(parent_id) and parent_id != "-1":
 		direction = transform.origin - bones[parent_id].position
 		bones[parent_id].children.push_back(bone_id)
 	
-	# Check if this bone is a parent to any existing nodes
+	# Check if this bone is a parent to any of the existing nodes
 	for bone in bones.keys():
 		if bones[bone].parent == bone_id:
 			preexisting_children.push_back(bone)
-			var child_direction = bones[bone].position - transform.origin
-			bones[bone].start_direction = child_direction.normalized() if child_direction.length() > 0.001 else Vector3.FORWARD
-			bones[bone].length = child_direction.length()
+			bones[bone].start_direction = bones[bone].position - transform.origin
+			bones[bone].length = bones[bone].start_direction.length()
 	
-	# Safe rotation extraction
-	var safe_rotation = _safe_get_rotation_quaternion(transform.basis)
-	
-	# Create bone data
+	# Add the bone
 	bones[bone_id] = {
-		# Tree data
-		parent                 = parent_id, 
-		children               = preexisting_children,
-		# Position data
-		position               = transform.origin,
-		length                 = direction.length(),
-		length_multiplier      = 1.0,
-		# Rotation data
-		rotation               = safe_rotation,
-		start_rotation         = safe_rotation,
-		start_direction        = direction.normalized() if direction.length() > 0.001 else Vector3.FORWARD,
-		# Solving data
-		weighted_vector_sum    = Vector3.ZERO,
-		weight_sum             = 0.0,
-		# Constraint data
-		modifier_flags         = MODIFIER.NONE,
+		### Tree data
+		"parent": parent_id, 
+		"children": preexisting_children,
+		### Solve position data
+		"position": transform.origin,
+		"length": direction.length(),
+		"length_multiplier": 1.0,
+		### Solve rotation data
+		"rotation": transform.basis.get_rotation_quaternion(),
+		"start_rotation": transform.basis.get_rotation_quaternion(),
+		"start_direction": direction.normalized() if direction.length() > 0.001 else Vector3.FORWARD,
+		### Solve Subbase data
+		"weighted_vector_sum": Vector3.ZERO,
+		"weight_sum": 0.0,
+		### Constraint data
+		"modifier_flags": MODIFIER.NONE,
 	}
 	
-	# Store initial transform if requested
+	# Add initial bone position for runtime purposes
 	if build_with_initial_transform:
-		bones[bone_id].init_tr = transform
+		bones[bone_id]["init_tr"] = transform
 	
-	# Mark as root if no parent
+	# Check if bone is the root
 	if parent_id == "-1":
 		roots.push_back(bone_id)
-		bones[bone_id].initial_position = transform.origin
+		bones[bone_id]["initial_position"] = transform.origin
+
+func find_bone_by_name(bone_name: String) -> String:
+	"""Find bone ID by name, supporting both string names and numeric IDs"""
+	# Direct name lookup
+	if bone_name_to_id.has(bone_name):
+		return str(bone_name_to_id[bone_name])
+	
+	# Try direct string ID
+	if bones.has(bone_name):
+		return bone_name
+		
+	# Try to find by partial name match (case insensitive)
+	var lower_name := bone_name.to_lower()
+	for name in bone_name_to_id.keys():
+		if name.to_lower() == lower_name:
+			return str(bone_name_to_id[name])
+	
+	# Try to find by contains (for names like "hand.L" vs "hand_L")
+	for name in bone_name_to_id.keys():
+		if name.to_lower().contains(lower_name) or lower_name.contains(name.to_lower()):
+			return str(bone_name_to_id[name])
+	
+	print("WARNING: Bone '" + bone_name + "' not found in skeleton!")
+	print("Available bones: ", bone_name_to_id.keys())
+	return "-1"
 
 func set_bone_modifier(bone_id: String, modifier: int, node = null) -> void:
-	if not bones.has(bone_id):
+	# Convert bone name to ID if needed
+	var actual_bone_id := find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
+	
+	if not bones.has(actual_bone_id) or actual_bone_id == "-1":
+		print("Cannot set modifier: bone not found: ", bone_id)
 		return
-		
+	
 	if modifier == MODIFIER.LOOK_AT:
-		bones[bone_id].modifier_flags |= MODIFIER.LOOK_AT
+		bones[actual_bone_id]["modifier_flags"] = bones[actual_bone_id]["modifier_flags"] | MODIFIER.LOOK_AT
 	
 	elif modifier == MODIFIER.BIND:
-		if node != null and bones.has(node.bone_1):
-			bones[node.bone_1].modifier_flags |= MODIFIER.BIND
+		if node != null:
+			var bone1_id := find_bone_by_name(node.bone_1)
+			var bone2_id := find_bone_by_name(node.bone_2)
+			var bone3_id := find_bone_by_name(node.bone_3)
 			
-			if not bones[node.bone_1].has("bind_ids"):
-				bones[node.bone_1].bind_ids = []
-			
-			bones[node.bone_1].bind_ids.push_back(node.bind_id)
-		
+			if bone1_id != "-1":
+				bones[bone1_id]["modifier_flags"] = bones[bone1_id]["modifier_flags"] | MODIFIER.BIND
+				
+				if not bones[bone1_id].has("bind_ids"):
+					bones[bone1_id]["bind_ids"] = []
+				bones[bone1_id]["bind_ids"].push_back(node.bind_id)
+	
 	elif modifier == MODIFIER.FORK_BIND:
-		if node != null and bones.has(node.bone_1):
-			bones[node.bone_1].modifier_flags |= MODIFIER.FORK_BIND
+		if node != null:
+			var bone1_id := find_bone_by_name(node.bone_1)
 			
-			if not bones[node.bone_1].has("fork_bind_ids"):
-				bones[node.bone_1].fork_bind_ids = []
-			
-			bones[node.bone_1].fork_bind_ids.push_back(node.bind_id)
+			if bone1_id != "-1":
+				bones[bone1_id]["modifier_flags"] = bones[bone1_id]["modifier_flags"] | MODIFIER.FORK_BIND
+				
+				if not bones[bone1_id].has("fork_bind_ids"):
+					bones[bone1_id]["fork_bind_ids"] = []
+				bones[bone1_id]["fork_bind_ids"].push_back(node.bind_id)
 	
 	elif modifier == MODIFIER.CAGE_BIND:
-		if node != null and bones.has(node.backbone_1):
-			bones[node.backbone_1].modifier_flags |= MODIFIER.CAGE_BIND
-			bones[node.backbone_1].cage_bind_id = node.bind_id
+		if node != null:
+			var backbone1_id := find_bone_by_name(node.backbone_1)
+			
+			if backbone1_id != "-1":
+				bones[backbone1_id]["modifier_flags"] = bones[backbone1_id]["modifier_flags"] | MODIFIER.CAGE_BIND
+				bones[backbone1_id]["cage_bind_id"] = node.bind_id
 	
 	else:
-		# Apply modifier to bone chain
 		var bone_queue: PackedStringArray = []
-		var current_bone = bone_id
+		var current_bone := actual_bone_id
 		
-		while current_bone != "-1" and bones.has(current_bone):
-			# Add children to queue
-			for child in bones[current_bone].children:
+		while true:
+			if current_bone == "-1" or not bones.has(current_bone):
+				break
+			
+			for child in bones[current_bone]["children"]:
 				bone_queue.push_back(child)
 			
-			# Apply modifier
-			bones[current_bone].modifier_flags |= modifier
-			bones[current_bone].modifier_master = bone_id
+			bones[current_bone]["modifier_flags"] = bones[current_bone]["modifier_flags"] | modifier
+			bones[current_bone]["modifier_master"] = actual_bone_id
 			
 			if modifier & MODIFIER.DAMPED_TRANSFORM and node != null:
-				bones[current_bone].velocity = Vector3.ZERO
+				bones[current_bone]["velocity"] = Vector3.ZERO
 				update_bone_damped_transform(current_bone, node)
 			
-			# Move to next bone
-			if bone_queue.size() > 0:
+			if bones[current_bone]["children"].size() != 0:
 				current_bone = bone_queue[0]
-				bone_queue = bone_queue.slice(1)
+				bone_queue.remove_at(0)
 			else:
-				break
+				current_bone = "-1"
 
-### WRITE VIRTUAL SKELETON TO REAL SKELETON - Fixed for Godot 4.4.1
+### WRITE VIRTUAL SKELETON TO REAL SKELETON
 func bake() -> void:
-	if not skel:
-		return
-		
 	for bone_id in bones.keys():
-		var bone_idx = int(bone_id)
-		if bone_idx < 0 or bone_idx >= skel.get_bone_count():
-			continue
-			
-		var new_pose = Transform3D()
-		new_pose.origin = bones[bone_id].position
+		var bone_idx := int(bone_id)
+		var new_pose := Transform3D()
+		new_pose.origin = bones[bone_id]["position"]
+		new_pose.basis = Basis(bones[bone_id]["rotation"])
 		
-		# Safe rotation application
-		var rotation = bones[bone_id].rotation
-		if not (is_finite(rotation.x) and is_finite(rotation.y) and is_finite(rotation.z) and is_finite(rotation.w)):
-			rotation = Quaternion.IDENTITY
-		
-		new_pose.basis = Basis(rotation)
-		
-		# Use the correct Godot 4 method - set_bone_pose for local transforms
-		skel.set_bone_pose(bone_idx, new_pose)
+		# Use the modern Godot 4.4.1 method
+		skel.set_bone_global_pose(bone_idx, new_pose)
 
 ## Reset bone transform to its initial value
 func revert() -> void:
-	if skel:
-		# Reset all bone poses to rest
-		skel.reset_bone_poses()
+	# Modern way to reset poses in Godot 4.4.1
+	skel.reset_bone_poses()
 
-### GETTERS - All with safety checks
+### GETTERS #####################################################################################################
 func get_bone_parent(bone_id: String) -> String:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id):
-		return bones[bone_id].parent
-	return "-1"
+		return bones[bone_id]["parent"]
+	else:
+		return "-1"
 
 func get_bone_children_count(bone_id: String) -> int:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id):
-		return bones[bone_id].children.size()
+		return bones[bone_id]["children"].size()
 	return 0
 
 func get_bone_children(bone_id: String) -> Array:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id):
-		return bones[bone_id].children
+		return bones[bone_id]["children"]
 	return []
 
 func get_bone_position(bone_id: String) -> Vector3:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id):
-		return bones[bone_id].position
+		return bones[bone_id]["position"]
 	return Vector3.ZERO
 
 func get_bone_rotation(bone_id: String) -> Quaternion:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id):
-		return bones[bone_id].rotation
+		return bones[bone_id]["rotation"]
 	return Quaternion.IDENTITY
 
 func get_bone_length(bone_id: String) -> float:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id):
-		return bones[bone_id].length * bones[bone_id].length_multiplier
+		return bones[bone_id]["length"] * bones[bone_id]["length_multiplier"]
 	return 0.0
 
 func get_bone_weight(bone_id: String) -> float:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id):
-		return bones[bone_id].weight_sum
+		return bones[bone_id]["weight_sum"]
 	return 0.0
 
 func get_bone_start_direction(bone_id: String) -> Vector3:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id):
-		return bones[bone_id].start_direction
+		return bones[bone_id]["start_direction"]
 	return Vector3.FORWARD
 
 func get_bone_start_rotation(bone_id: String) -> Quaternion:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id):
-		return bones[bone_id].start_rotation
+		return bones[bone_id]["start_rotation"]
 	return Quaternion.IDENTITY
 
 func has_bone(bone_id: String) -> bool:
-	return bones.has(bone_id)
-
-func get_bone_modifiers(bone_id: String) -> int:
+	# First check direct ID
 	if bones.has(bone_id):
-		return bones[bone_id].modifier_flags
+		return true
+	# Then try to find by name
+	var found_id := find_bone_by_name(bone_id)
+	return found_id != "-1" and bones.has(found_id)
+
+## Modifier stuff
+func get_bone_modifiers(bone_id: String) -> int:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
+	if bones.has(bone_id):
+		return bones[bone_id]["modifier_flags"]
 	return MODIFIER.NONE
 
 func get_bone_modifier_master(bone_id: String) -> String:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id) and bones[bone_id].has("modifier_master"):
-		return bones[bone_id].modifier_master
-	return ""
+		return bones[bone_id]["modifier_master"]
+	return "-1"
 
 func get_bone_damped_transform(bone_id: String) -> Array:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id) and bones[bone_id].has("damped_transform"):
-		return bones[bone_id].damped_transform
+		return bones[bone_id]["damped_transform"]
 	return []
 
-func get_bone_bind_ids(bone_id: String) -> Array:
+func get_bone_bind_ids(bone_id: String) -> PackedInt32Array:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id) and bones[bone_id].has("bind_ids"):
-		return bones[bone_id].bind_ids
-	return []
+		return PackedInt32Array(bones[bone_id]["bind_ids"])
+	return PackedInt32Array()
 
-func get_bone_fork_bind_ids(bone_id: String) -> Array:
+func get_bone_fork_bind_ids(bone_id: String) -> PackedInt32Array:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id) and bones[bone_id].has("fork_bind_ids"):
-		return bones[bone_id].fork_bind_ids
-	return []
+		return PackedInt32Array(bones[bone_id]["fork_bind_ids"])
+	return PackedInt32Array()
 
 func get_bone_cage_bind_id(bone_id: String) -> int:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
 	if bones.has(bone_id) and bones[bone_id].has("cage_bind_id"):
-		return bones[bone_id].cage_bind_id
+		return bones[bone_id]["cage_bind_id"]
 	return -1
 
-### SETTERS - All with safety checks
+### SETTERS #####################################################################################################
 func set_bone_position(bone_id: String, position: Vector3) -> void:
-	if bones.has(bone_id) and is_finite(position.x) and is_finite(position.y) and is_finite(position.z):
-		bones[bone_id].position = position
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
+	if bones.has(bone_id):
+		bones[bone_id]["position"] = position
 
 func set_biassed_bone_position(bone_id: String, position: Vector3, weight: float) -> void:
-	if not bones.has(bone_id) or not is_finite(weight) or weight <= 0:
-		return
-		
-	if not (is_finite(position.x) and is_finite(position.y) and is_finite(position.z)):
-		return
-		
-	bones[bone_id].weight_sum += weight
-	bones[bone_id].weighted_vector_sum += position * weight
-	
-	if bones[bone_id].weight_sum > 0:
-		bones[bone_id].position = bones[bone_id].weighted_vector_sum / bones[bone_id].weight_sum
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
+	if bones.has(bone_id):
+		bones[bone_id]["weight_sum"] += weight
+		bones[bone_id]["weighted_vector_sum"] += position * weight
+		bones[bone_id]["position"] = bones[bone_id]["weighted_vector_sum"] / bones[bone_id]["weight_sum"]
 
 func set_bone_rotation(bone_id: String, rotation: Quaternion) -> void:
-	if not bones.has(bone_id):
-		return
-		
-	# Validate quaternion before setting
-	if is_finite(rotation.x) and is_finite(rotation.y) and is_finite(rotation.z) and is_finite(rotation.w):
-		# Check if quaternion is reasonably normalized
-		var length_sq = rotation.length_squared()
-		if is_finite(length_sq) and length_sq > 0.1 and length_sq < 10.0:
-			bones[bone_id].rotation = rotation.normalized()
-		else:
-			bones[bone_id].rotation = Quaternion.IDENTITY
-	else:
-		bones[bone_id].rotation = Quaternion.IDENTITY
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
+	if bones.has(bone_id):
+		bones[bone_id]["rotation"] = rotation
 
 func set_bone_length_multiplier(bone_id: String, multiplier: float) -> void:
-	if bones.has(bone_id) and is_finite(multiplier) and multiplier > 0:
-		bones[bone_id].length_multiplier = multiplier
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
+	if bones.has(bone_id):
+		bones[bone_id]["length_multiplier"] = multiplier
 
 func add_velocity_to_bone(bone_id: String, velocity: Vector3) -> Vector3:
-	if not bones.has(bone_id):
-		return Vector3.ZERO
-		
-	if not bones[bone_id].has("velocity"):
-		bones[bone_id].velocity = Vector3.ZERO
-		
-	if is_finite(velocity.x) and is_finite(velocity.y) and is_finite(velocity.z):
-		bones[bone_id].velocity += velocity
-		
-	return bones[bone_id].velocity
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
+	if bones.has(bone_id):
+		if not bones[bone_id].has("velocity"):
+			bones[bone_id]["velocity"] = Vector3.ZERO
+		bones[bone_id]["velocity"] += velocity
+		return bones[bone_id]["velocity"]
+	return Vector3.ZERO
 
+## Physics Simulations
 func update_bone_damped_transform(bone_id: String, node) -> void:
-	if not bones.has(bone_id) or not node:
+	bone_id = find_bone_by_name(bone_id) if not bones.has(bone_id) else bone_id
+	if not bones.has(bone_id):
 		return
 		
-	bones[bone_id].damped_transform = []
-	var parent_id = bones[bone_id].parent
+	bones[bone_id]["damped_transform"] = []
+	var parent_id := get_bone_parent(bone_id)
 	
-	if bones.has(parent_id) and bones[parent_id].has("damped_transform"):
-		bones[bone_id].damped_transform.push_back(clampf(bones[parent_id].damped_transform[0] * node.stiffness_passed_down, 0.0, 1.0))
-		bones[bone_id].damped_transform.push_back(clampf(bones[parent_id].damped_transform[1] * node.damping_passed_down, 0.0, 1.0))
-		bones[bone_id].damped_transform.push_back(clampf(bones[parent_id].damped_transform[2] * node.mass_passed_down, 0.0, 1.0))
+	if parent_id != "-1" and bones.has(parent_id) and bones[parent_id].has("damped_transform"):
+		bones[bone_id]["damped_transform"].push_back(clamp(bones[parent_id]["damped_transform"][0] * node.stiffness_passed_down, 0.0, 1.0))
+		bones[bone_id]["damped_transform"].push_back(clamp(bones[parent_id]["damped_transform"][1] * node.damping_passed_down, 0.0, 1.0))
+		bones[bone_id]["damped_transform"].push_back(clamp(bones[parent_id]["damped_transform"][2] * node.mass_passed_down, 0.0, 1.0))
 	else:
-		bones[bone_id].damped_transform.push_back(node.stiffness)
-		bones[bone_id].damped_transform.push_back(node.damping)
-		bones[bone_id].damped_transform.push_back(node.mass)
+		bones[bone_id]["damped_transform"].push_back(node.stiffness)
+		bones[bone_id]["damped_transform"].push_back(node.damping)
+		bones[bone_id]["damped_transform"].push_back(node.mass)
 	
-	bones[bone_id].damped_transform.push_back(node.gravity)
+	bones[bone_id]["damped_transform"].push_back(node.gravity)
 
-### CLEAN UP
+### CLEAN UP ####################################################################################################
 func wipe_weights() -> void:
 	for bone in bones.keys():
-		bones[bone].weight_sum = 0
-		bones[bone].weighted_vector_sum = Vector3.ZERO
+		bones[bone]["weight_sum"] = 0.0
+		bones[bone]["weighted_vector_sum"] = Vector3.ZERO
 
 func wipe_modifiers() -> void:
 	for bone in bones.values():
-		if bone.modifier_flags == MODIFIER.NONE:
+		if bone["modifier_flags"] == MODIFIER.NONE:
 			continue
-		if bone.modifier_flags & MODIFIER.BIND:
+		if bone["modifier_flags"] & MODIFIER.BIND:
 			bone.erase("bind_ids")
-		if bone.modifier_flags & MODIFIER.FORK_BIND:
+		if bone["modifier_flags"] & MODIFIER.FORK_BIND:
 			bone.erase("fork_bind_ids")
-		if bone.modifier_flags & MODIFIER.SOLID:
+		if bone["modifier_flags"] & MODIFIER.CAGE_BIND:
+			bone.erase("cage_bind_id")
+		if bone["modifier_flags"] & MODIFIER.SOLID:
 			bone.erase("modifier_master")
-		if bone.modifier_flags & MODIFIER.DAMPED_TRANSFORM:
+		if bone["modifier_flags"] & MODIFIER.DAMPED_TRANSFORM:
 			bone.erase("modifier_master")
 			bone.erase("velocity")
 			bone.erase("damped_transform")
-		bone.modifier_flags = MODIFIER.NONE
+		bone["modifier_flags"] = MODIFIER.NONE
 
-### DEBUG
+### DEBUG ######################################################################################################
 func cshow(properties: String = "parent,children", N: int = -1) -> void:
-	if not skel:
-		print("No skeleton assigned")
-		return
-		
-	var props: PackedStringArray = properties.split(",")
-	var count = 0
+	var props := properties.split(",")
+	var count := 0
 	for bone_id in bones.keys():
 		if N >= 0 and count >= N:
 			break
-		var bone_idx = int(bone_id)
-		var bone_name = skel.get_bone_name(bone_idx) if bone_idx >= 0 and bone_idx < skel.get_bone_count() else "UNKNOWN"
-		print("## ", bone_name.to_upper(), " (", bone_id, ") ####################################")
+		
+		var bone_name := "UNKNOWN"
+		if bone_id_to_name.has(int(bone_id)):
+			bone_name = bone_id_to_name[int(bone_id)]
+		
+		print("## ", bone_name.to_upper(), " (ID: ", bone_id, ") ####################################")
 		for prop in props:
 			if bones[bone_id].has(prop):
 				print("\t\t\t" + prop + " - ", bones[bone_id][prop])
 		count += 1
+
+func get_bone_name_for_id(bone_id: String) -> String:
+	"""Get the actual bone name for a given ID"""
+	var id := int(bone_id) if bone_id.is_valid_int() else -1
+	if bone_id_to_name.has(id):
+		return bone_id_to_name[id]
+	return "UNKNOWN"
+
+func list_all_bones() -> void:
+	"""Debug function to list all available bones"""
+	print("=== AVAILABLE BONES ===")
+	for i in range(skel.get_bone_count()):
+		var name := skel.get_bone_name(i)
+		print("ID: ", i, " Name: '", name, "'")
+	print("=======================")
