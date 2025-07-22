@@ -4,12 +4,12 @@ importer="scene"
 importer_version=1
 type="PackedScene"
 uid="uid://ceildcnuc0wgw"
-path="res://.godot/imported/BaseModel.fbx-adac50f984a26caabc9258e1b6e804a9.scn"
+path="res://.godot/imported/CharacterModel.fbx-a2a671f8e5c94790fe2be90d7b59b952.scn"
 
 [deps]
 
-source_file="res://addons/FBIK/BaseModel.fbx"
-dest_files=["res://.godot/imported/BaseModel.fbx-adac50f984a26caabc9258e1b6e804a9.scn"]
+source_file="res://addons/FBIK/example/CharacterModel.fbx"
+dest_files=["res://.godot/imported/CharacterModel.fbx-a2a671f8e5c94790fe2be90d7b59b952.scn"]
 
 [params]
 
