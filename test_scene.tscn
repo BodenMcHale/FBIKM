@@ -443,7 +443,6 @@ bones/53/scale = Vector3(1, 1, 1)
 
 [node name="KinematicsManager" type="Node" parent="BaseModel"]
 script = ExtResource("1_coq8p")
-skeleton_path = NodePath("../metarig/Skeleton3D")
 enabled = true
 metadata/_custom_type_script = "uid://drwhut4kuwe8b"
 
@@ -482,7 +481,6 @@ metadata/_custom_type_script = "uid://crlnyynsrixme"
 [node name="KinematicsLookAt" type="Marker3D" parent="BaseModel/KinematicsManager"]
 script = ExtResource("4_8pr8v")
 bone_id = "spine.005"
-spin_override_angle = null
 bone_id = "spine.005"
 metadata/_custom_type_script = "uid://cw5vf28xa3f2j"
 

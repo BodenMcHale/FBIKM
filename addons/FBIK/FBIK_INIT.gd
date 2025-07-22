@@ -1,8 +1,6 @@
 @tool
 extends EditorPlugin
 
-## Simplified FBIK Plugin for Godot 4.x
-
 func _enter_tree():
 	# Add custom node types to the editor
 	add_custom_type(

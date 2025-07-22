@@ -1,7 +1,22 @@
 @tool
 extends Marker3D
 
-## Simplified IK Chain for Godot 4.x
+"""
+	FBIKM - Chain
+   		by Nemo Czanderlitch/Nino Čandrlić
+			@R3X-G1L       (godot assets store)
+			R3X-G1L6AME5H  (github)
+
+	This node HAS to be a child of a FBIKM node to work. This node itself is the target.
+
+	Name "Chain" comes from the fact that it solves for a set of connected bones; they solve a part of a skeleton;
+	you can imagine your arm as a chain of two bones: elbow, and forearm. It begins its solving process from the tip
+	bone, and continues up the tree structure until it reaches the user specified root bone, or a bone without a parent.
+
+	Because FBIKM allows for multi chain solving, each chain has its individual target, and the pull force. When two
+	chains pull at one another, priority is decided by by this value.
+"""
+
 
 const FBIKM_NODE_ID = 1
 

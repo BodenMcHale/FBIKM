@@ -1,8 +1,14 @@
 @tool
 extends Marker3D
 
-## Simplified IK Pole for Godot 4.x
-## Controls the bend direction of a bone chain (like elbow or knee direction)
+"""
+	FBIKM - Pole
+		by Nemo Czanderlitch/Nino Čandrlić
+			@R3X-G1L       (godot assets store)
+			R3X-G1L6AME5H  (github)
+	This node serves as a magnet for the chain. It ensures that the joints bend in
+	a certain direction; the direction facing this node.
+"""
 
 const FBIKM_NODE_ID = 2
 

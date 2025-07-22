@@ -5,8 +5,9 @@ extends RefCounted
 				by Nemo Czanderlitch/Nino Čandrlić
 						@R3X-G1L       (godot assets store)
 						R3X-G1L6AME5H  (github)
-		
-		Updated for Godot 4.4.1 - Fixed API calls and crash issues
+		This is an higher level representation of the Godot Skeleton Node; it holds more data.
+		It stores child bones, thusly allowing for solving branches in the Skeleton.
+		Additionally, it holds more rotation data for smoother solutions.
 """
 
 enum MODIFIER {

@@ -1,9 +1,14 @@
 @tool
 extends Marker3D
 
-## Simplified IK LookAt for Godot 4.x
-## Makes a bone orient towards this node's position
+"""
+		FBIKM - Look At
+				by Nemo Czanderlitch/Nino Čandrlić
+						@R3X-G1L       (godot assets store)
+						R3X-G1L6AME5H  (github)
+		Makes one of the specified bone's sides face this node. Useful in having the head look at something.
 
+"""
 const FBIKM_NODE_ID = 3
 
 enum LOOK_SIDE {UP, DOWN, LEFT, RIGHT, FORWARD, BACK}
