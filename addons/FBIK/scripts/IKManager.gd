@@ -26,6 +26,8 @@ const FBIKM_EXAGGERATOR      = 6
 const FBIKM_SOLIDIFIER       = 7
 const FBIKM_DAMPED_TRANSFORM = 8
 const FBIKM_CAGE             = 9
+const FBIKM_PHYSICS_RAGDOLL   = 10
+const FBIKM_RAGDOLL_CONTROLLER = 11
 
 const VOID_ID = "-1"
 
@@ -59,6 +61,8 @@ var debug_mesh: ArrayMesh
 ## GLOBAL VARIABLES ########################################################################################
 var skel: Skeleton3D               # skeleton to which the changes are applied
 var virt_skel: VirtualSkeleton   # an extended skeleton used to calculate the changes
+var _physics_ragdolls := []
+var _ragdoll_controllers := []
 
 ## all the possible drivers that need to be ran
 var _chains: Array[Node] = []
@@ -121,10 +125,11 @@ func _wipe_drivers() -> void:
 	_poles.clear()
 	_look_ats.clear()
 	_binds.clear()
-	_fork_binds.clear()
-	_cage_binds.clear()
+	_physics_ragdolls.clear()
+	_ragdoll_controllers.clear()
 	if virt_skel:
 		virt_skel.wipe_modifiers()
+
 
 func _build_virtual_skeleton(in_editor: bool) -> Error:
 	if skeleton == null:
@@ -267,36 +272,49 @@ func _evaluate_drivers() -> void:
 		push_error("Tried to evaluate drivers but failed because there was no Skeleton Node assigned.")
 		return
 
-	for node in get_children():
-		if node == debug_mesh_instance:
-			continue  # Skip our debug visualization node
-			
-		if node.has_method("get") and node.get("FBIKM_NODE_ID") != null:
-			match node.FBIKM_NODE_ID:
+	## run the evaluation relevant to the node processed
+	for node in self.get_children():
+		var type = node.get_script()
+		if node.get("FBIKM_NODE_ID") != null:
+			match(node.FBIKM_NODE_ID):
 				FBIKM_CHAIN:
-					_eval_chain_node(node)
+					_eval_chain_node( node )
 				FBIKM_POLE:
-					_eval_pole_node(node)
+					_eval_pole_node( node )
 				FBIKM_BIND:
-					_eval_bind_node(node)
+					_eval_bind_node( node )
 				FBIKM_FORK_BIND:
-					_eval_fork_bind_node(node)
+					_eval_fork_bind_node( node )
 				FBIKM_LOOK_AT:
-					_eval_look_at_node(node)
+					_eval_look_at_node( node )
 				FBIKM_EXAGGERATOR:
-					_eval_exaggerator_node(node)
+					_eval_exaggerator_node( node )
 				FBIKM_SOLIDIFIER:
-					_eval_solidifier_node(node)
+					_eval_solidifier_node( node )
 				FBIKM_DAMPED_TRANSFORM:
-					_eval_damped_transform_node(node)
+					_eval_damped_transform_node( node )
 				FBIKM_CAGE:
-					_eval_cage_bind_node(node)
+					_eval_cage_bind_node( node )
+				FBIKM_PHYSICS_RAGDOLL:
+					_eval_physics_ragdoll_node( node )
+				FBIKM_RAGDOLL_CONTROLLER:
+					_eval_ragdoll_controller_node( node )
 
 func _reevaluate_drivers() -> void:
 	_wipe_drivers()
 	_evaluate_drivers()
 
 ## DRIVER EVALUATION FUNCTIONS #############################################################################
+
+func _eval_physics_ragdoll_node(physics_ragdoll) -> void:
+	# Physics ragdoll doesn't need validation like other nodes
+	# It creates its own physics bodies based on skeleton
+	_physics_ragdolls.push_back(physics_ragdoll)
+
+func _eval_ragdoll_controller_node(ragdoll_controller) -> void:
+	# Ragdoll controller acts like a position target
+	_ragdoll_controllers.push_back(ragdoll_controller)
+
 
 func _eval_chain_node(chain: Node) -> void:
 	# Convert bone name to ID if needed
@@ -518,18 +536,67 @@ func _eval_cage_bind_node(cage: Node) -> void:
 
 ## RUNTIME #################################################################################################
 
-func _physics_process(_delta: float) -> void:
-	if enabled and skeleton != null and virt_skel != null:
-		var inverse_transform := skeleton.global_transform.affine_inverse()
-		solve_chains(inverse_transform)
-		solve_poles(inverse_transform)
-		solve_look_ats(inverse_transform)
-		total_pass()
-		virt_skel.bake()
+func _physics_process(_delta):
+	if enabled and skel != null and virt_skel != null:
+		var inverse_transform = skel.get_global_transform().affine_inverse()
 		
-		# Update debug wireframe
-		if debug_wireframe:
-			_update_debug_wireframe()
+		# Update physics ragdolls from virtual skeleton (kinematic mode)
+		for physics_ragdoll in _physics_ragdolls:
+			physics_ragdoll.update_from_virtual_skeleton(virt_skel)
+		
+		# Solve standard IK if not overridden by ragdoll
+		var any_ragdoll_active = false
+		for physics_ragdoll in _physics_ragdolls:
+			if physics_ragdoll.ragdoll_enabled:
+				any_ragdoll_active = true
+				break
+		
+		if not any_ragdoll_active:
+			solve_chains(inverse_transform)
+			solve_poles(inverse_transform)
+			solve_look_ats(inverse_transform)
+			total_pass()
+		
+		# Update virtual skeleton from physics ragdolls (ragdoll mode)
+		for physics_ragdoll in _physics_ragdolls:
+			physics_ragdoll.update_virtual_skeleton_from_physics(virt_skel)
+		
+		# Apply final result to skeleton
+		virt_skel.bake()
+
+# Add utility function to get physics ragdoll
+func get_physics_ragdoll() -> Node:
+	"""Get the first physics ragdoll node, if any"""
+	if _physics_ragdolls.size() > 0:
+		return _physics_ragdolls[0]
+	return null
+
+# Add utility function to get ragdoll controller
+func get_ragdoll_controller() -> Node:
+	"""Get the first ragdoll controller node, if any"""
+	if _ragdoll_controllers.size() > 0:
+		return _ragdoll_controllers[0]
+	return null
+
+# Add convenience functions for game integration
+func activate_ragdoll(impact_force: Vector3 = Vector3.ZERO, impact_bone: String = ""):
+	"""Activate ragdoll mode on the character"""
+	var controller = get_ragdoll_controller()
+	if controller:
+		controller.activate_ragdoll(impact_force, impact_bone)
+
+func deactivate_ragdoll():
+	"""Return to normal IK animation"""
+	var controller = get_ragdoll_controller()
+	if controller:
+		controller.deactivate_ragdoll()
+
+func is_ragdoll_active() -> bool:
+	"""Check if character is currently in ragdoll mode"""
+	var physics_ragdoll = get_physics_ragdoll()
+	if physics_ragdoll:
+		return physics_ragdoll.ragdoll_enabled
+	return false
 
 ## SOLVING FUNCTIONS - SIMPLIFIED STUBS FOR NOW ###########################################################
 ## Note: These would need to be implemented with your full FABRIK logic
