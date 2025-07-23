@@ -41,7 +41,7 @@ signal bone_names_obtained(bone_names: String)
 @export var minimal_distance: float = 0.01  ## smaller = more precise = less performant
 
 ### Debug ###
-var DEBUG_dump_bones: bool = false   # Turn on
+var DEBUG_dump_bones: bool = true   # Turn on
 var DEBUG_bone_property: String = ""   # name bone property(position, rotation, etc.); list all by default
 var DEBUG_entry_count: int = -1     # Show N bones; list all by default
 

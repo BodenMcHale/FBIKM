@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://ceildcnuc0wgw"
-path="res://.godot/imported/CharacterModel.fbx-a2a671f8e5c94790fe2be90d7b59b952.scn"
+uid="uid://c1nh76iiy0mge"
+path="res://.godot/imported/BaseModel.glb-6234485218a4ad3d933449503814630e.scn"
 
 [deps]
 
-source_file="res://addons/FBIK/example/CharacterModel.fbx"
-dest_files=["res://.godot/imported/CharacterModel.fbx-a2a671f8e5c94790fe2be90d7b59b952.scn"]
+source_file="res://addons/FBIK/example/BaseModel.glb"
+dest_files=["res://.godot/imported/BaseModel.glb-6234485218a4ad3d933449503814630e.scn"]
 
 [params]
 
@@ -28,17 +28,16 @@ meshes/force_disable_compression=false
 skins/use_named_skins=true
 animation/import=true
 animation/fps=30
-animation/trimming=true
+animation/trimming=false
 animation/remove_immutable_tracks=true
 animation/import_rest_as_RESET=false
 import_script/path=""
 _subresources={
 "nodes": {
-"PATH:godot_rig/Skeleton3D/Main Mesh": {
+"PATH:Armature/Skeleton3D/Main Mesh": {
 "generate/physics": true
 }
 }
 }
-fbx/importer=0
-fbx/allow_geometry_helper_nodes=false
-fbx/embedded_image_handling=1
+gltf/naming_version=1
+gltf/embedded_image_handling=1
