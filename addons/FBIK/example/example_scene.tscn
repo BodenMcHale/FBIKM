@@ -1,8 +1,10 @@
-[gd_scene load_steps=10 format=4 uid="uid://b3jxr7yq6kqjt"]
+[gd_scene load_steps=12 format=4 uid="uid://b3jxr7yq6kqjt"]
 
 [ext_resource type="Script" uid="uid://drwhut4kuwe8b" path="res://addons/FBIK/scripts/IKManager.gd" id="1_md0ae"]
 [ext_resource type="Script" uid="uid://crlnyynsrixme" path="res://addons/FBIK/scripts/IKChain.gd" id="2_bd6ru"]
 [ext_resource type="Script" uid="uid://cw5vf28xa3f2j" path="res://addons/FBIK/scripts/IKLookAt.gd" id="3_lya5r"]
+[ext_resource type="Script" uid="uid://cybwth44w8ee0" path="res://addons/FBIK/scripts/PhysicsRagdoll.gd" id="4_lya5r"]
+[ext_resource type="Script" uid="uid://cdqhvyt8f1o31" path="res://addons/FBIK/scripts/RagdollController.gd" id="5_ntqeh"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_coq8p"]
 
@@ -529,3 +531,16 @@ script = ExtResource("3_lya5r")
 bone_id = "5"
 bone_id = "5"
 metadata/_custom_type_script = "uid://cw5vf28xa3f2j"
+
+[node name="PhysicsRagdoll" type="Node3D" parent="BaseModel/Armature/Skeleton3D/KinematicsManager"]
+script = ExtResource("4_lya5r")
+skeleton_path = NodePath("../..")
+fbikm_manager_path = NodePath("..")
+ragdoll_enabled = true
+metadata/_custom_type_script = "uid://cybwth44w8ee0"
+
+[node name="RagdollController" type="Node" parent="BaseModel/Armature/Skeleton3D/KinematicsManager" node_paths=PackedStringArray("physics_ragdoll", "fbikm_manager")]
+script = ExtResource("5_ntqeh")
+physics_ragdoll = NodePath("../PhysicsRagdoll")
+fbikm_manager = NodePath("..")
+metadata/_custom_type_script = "uid://cdqhvyt8f1o31"
